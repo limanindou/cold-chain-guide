@@ -1,4 +1,4 @@
-import { AlertTriangle, ListChecks, Moon } from 'lucide-react';
+import { AlertTriangle, ListChecks } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Card, SectionTitle, Skeleton, StatusPill } from '../components/bits';
 import { DeviceCard } from '../components/DeviceCard';
@@ -35,7 +35,6 @@ export default function Dashboard() {
 
   const profiles = Object.fromEntries(data.profiles.map((p) => [p.profileId, p]));
   const incidentsById = Object.fromEntries(data.incidents.map((i) => [i.incidentId, i]));
-  const allOk = data.devices.every((d) => d.status === 'OK');
   const recent = data.incidents.slice(0, 6);
 
   return (
@@ -48,15 +47,6 @@ export default function Dashboard() {
 
       <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
         <div className="space-y-6">
-          {allOk && (
-            <div className="flex items-center gap-3 rounded-2xl bg-emerald-500/10 px-4 py-3 text-sm text-emerald-800 dark:text-emerald-200">
-              <Moon className="h-4 w-4 shrink-0" aria-hidden />
-              <span>
-                All fridges are in range. <b>No workflow is running</b> — while everything is fine, ColdChain Guard
-                only runs a tiny once-a-minute check for silent sensors (free tier).
-              </span>
-            </div>
-          )}
           <div className="grid gap-4 md:grid-cols-2">
             {data.devices.map((d) => (
               <DeviceCard
