@@ -1,0 +1,18 @@
+version = 0.1
+
+[default.global.parameters]
+stack_name = "coldchain-guard"
+
+[default.deploy.parameters]
+stack_name = "coldchain-guard"
+region = "us-east-1"
+resolve_s3 = true
+s3_prefix = "coldchain-guard"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+# DeviceApiKey is NoEcho and intentionally NOT stored here — pass it on the command line:
+#   sam deploy --parameter-overrides TimeScale=45 DemoMode=true SenderEmail=you@example.com DeviceApiKey=<random-32-chars>
+parameter_overrides = "TimeScale=45 DemoMode=true"
+
+[default.validate.parameters]
+lint = true

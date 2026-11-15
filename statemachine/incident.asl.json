@@ -1,0 +1,1014 @@
+{
+  "Comment": "ColdChain Guard: one execution per temperature excursion. Grace period -> alert -> escalate on silence -> evidence.",
+  "QueryLanguage": "JSONata",
+  "StartAt": "Init",
+  "States": {
+    "Init": {
+      "Type": "Pass",
+      "Comment": "One workflow for all three incident types (TEMP_EXCURSION, POWER_LOST, SENSOR_OFFLINE). Picks the grace by type and applies demo TIME_SCALE (${TimeScale}) to every timer.",
+      "Assign": {
+        "incidentId": "{% $states.input.incidentId %}",
+        "deviceId": "{% $states.input.deviceId %}",
+        "deviceName": "{% $states.input.deviceName %}",
+        "minC": "{% $states.input.minC %}",
+        "maxC": "{% $states.input.maxC %}",
+        "escalation": "{% $states.input.escalation %}",
+        "level": 0,
+        "recoveryChecks": 0,
+        "incidentType": "{% $states.input.type %}",
+        "realGraceSeconds": "{% ($states.input.type = 'POWER_LOST' ? $states.input.powerGraceSeconds : ($states.input.type = 'SENSOR_OFFLINE' ? 0 : $states.input.graceSeconds)) %}",
+        "graceSeconds": "{% $max([1, $floor(($states.input.type = 'POWER_LOST' ? $states.input.powerGraceSeconds : ($states.input.type = 'SENSOR_OFFLINE' ? 0 : $states.input.graceSeconds)) / ${TimeScale})]) %}",
+        "offlineAfter": "{% $max([20, $floor($states.input.offlineAfterSeconds / ${TimeScale})]) %}",
+        "ackTimeout": "{% $max([5, $floor($states.input.ackTimeoutSeconds / ${TimeScale})]) %}",
+        "recheckSeconds": "{% $max([3, $floor($states.input.recheckSeconds / ${TimeScale})]) %}",
+        "maxRecoveryChecks": "{% $max([1, $ceil($states.input.recoveryWindowSeconds / $states.input.recheckSeconds)]) %}"
+      },
+      "Next": "MarkGrace"
+    },
+    "MarkGrace": {
+      "Type": "Task",
+      "Comment": "Direct DynamoDB SDK integration (no Lambda): record the execution ARN and a GRACE event.",
+      "Resource": "arn:aws:states:::aws-sdk:dynamodb:transactWriteItems",
+      "Arguments": {
+        "TransactItems": [
+          {
+            "Update": {
+              "TableName": "${TableName}",
+              "Key": {
+                "PK": {
+                  "S": "{% 'INCIDENT#' & $incidentId %}"
+                },
+                "SK": {
+                  "S": "META"
+                }
+              },
+              "UpdateExpression": "SET executionArn = :arn, graceEndsAt = :ge",
+              "ExpressionAttributeValues": {
+                ":arn": {
+                  "S": "{% $states.context.Execution.Id %}"
+                },
+                ":ge": {
+                  "S": "{% $fromMillis($toMillis($now()) + $graceSeconds * 1000) %}"
+                }
+              }
+            }
+          },
+          {
+            "Put": {
+              "TableName": "${TableName}",
+              "Item": {
+                "PK": {
+                  "S": "{% 'INCIDENT#' & $incidentId %}"
+                },
+                "SK": {
+                  "S": "{% 'EVENT#' & $now() & '#GRACE' %}"
+                },
+                "incidentId": {
+                  "S": "{% $incidentId %}"
+                },
+                "deviceId": {
+                  "S": "{% $deviceId %}"
+                },
+                "type": {
+                  "S": "GRACE"
+                },
+                "ts": {
+                  "S": "{% $now() %}"
+                },
+                "actor": {
+                  "S": "system"
+                },
+                "detail": {
+                  "S": "{% $incidentType = 'SENSOR_OFFLINE' ? 'Sensor silent past its offline threshold — alerting now' : (($incidentType = 'POWER_LOST' ? 'Power grace period' : 'Grace period') & ': waiting ' & $graceSeconds & ' s (' & $round($realGraceSeconds / 60, 1) & ' min real time) before alerting anyone') %}"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDb.ProvisionedThroughputExceededException",
+            "DynamoDb.TransactionConflictException",
+            "DynamoDb.TransactionCanceledException",
+            "DynamoDb.ThrottlingException",
+            "DynamoDb.InternalServerErrorException",
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 4,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Next": "WaitGrace"
+    },
+    "WaitGrace": {
+      "Type": "Wait",
+      "Comment": "A durable timer that costs nothing while it waits. Kills false alarms from door openings.",
+      "Seconds": "{% $graceSeconds %}",
+      "Next": "CheckRecovered"
+    },
+    "CheckRecovered": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${CheckRecoveredFunctionArn}",
+        "Payload": {
+          "incidentId": "{% $incidentId %}",
+          "deviceId": "{% $deviceId %}",
+          "type": "{% $incidentType %}",
+          "minC": "{% $minC %}",
+          "maxC": "{% $maxC %}",
+          "offlineAfterSeconds": "{% $offlineAfter %}"
+        }
+      },
+      "Assign": {
+        "recovered": "{% $states.result.Payload.recovered %}",
+        "latestTempC": "{% $states.result.Payload.latestTempC %}"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Next": "RecoveredDuringGrace"
+    },
+    "RecoveredDuringGrace": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Condition": "{% $recovered %}",
+          "Next": "CloseRecovered"
+        }
+      ],
+      "Default": "GraceExpired"
+    },
+    "CloseRecovered": {
+      "Type": "Task",
+      "Comment": "Recovered inside the grace period: close quietly, no alarm.",
+      "Resource": "arn:aws:states:::aws-sdk:dynamodb:transactWriteItems",
+      "Arguments": {
+        "TransactItems": [
+          {
+            "Update": {
+              "TableName": "${TableName}",
+              "Key": {
+                "PK": {
+                  "S": "{% 'INCIDENT#' & $incidentId %}"
+                },
+                "SK": {
+                  "S": "META"
+                }
+              },
+              "UpdateExpression": "SET #s = :s, resolvedAt = :now",
+              "ExpressionAttributeNames": {
+                "#s": "status"
+              },
+              "ExpressionAttributeValues": {
+                ":s": {
+                  "S": "RECOVERED"
+                },
+                ":now": {
+                  "S": "{% $now() %}"
+                }
+              }
+            }
+          },
+          {
+            "Update": {
+              "TableName": "${TableName}",
+              "Key": {
+                "PK": {
+                  "S": "{% 'DEVICE#' & $deviceId %}"
+                },
+                "SK": {
+                  "S": "META"
+                }
+              },
+              "UpdateExpression": "SET #s = :s REMOVE openIncidentId, incidentStartedAt",
+              "ExpressionAttributeNames": {
+                "#s": "status"
+              },
+              "ExpressionAttributeValues": {
+                ":s": {
+                  "S": "OK"
+                }
+              }
+            }
+          },
+          {
+            "Put": {
+              "TableName": "${TableName}",
+              "Item": {
+                "PK": {
+                  "S": "{% 'INCIDENT#' & $incidentId %}"
+                },
+                "SK": {
+                  "S": "{% 'EVENT#' & $now() & '#RECOVERED' %}"
+                },
+                "incidentId": {
+                  "S": "{% $incidentId %}"
+                },
+                "deviceId": {
+                  "S": "{% $deviceId %}"
+                },
+                "type": {
+                  "S": "RECOVERED"
+                },
+                "ts": {
+                  "S": "{% $now() %}"
+                },
+                "actor": {
+                  "S": "system"
+                },
+                "detail": {
+                  "S": "{% ($incidentType = 'POWER_LOST' ? 'Power restored within the grace period' : ($incidentType = 'SENSOR_OFFLINE' ? 'Sensor back online and in range' : 'Recovered within the grace period at ' & $latestTempC & ' °C')) & ' — no alarm sent' %}"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDb.ProvisionedThroughputExceededException",
+            "DynamoDb.TransactionConflictException",
+            "DynamoDb.TransactionCanceledException",
+            "DynamoDb.ThrottlingException",
+            "DynamoDb.InternalServerErrorException",
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 4,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Next": "BuildEvidence"
+    },
+    "GraceExpired": {
+      "Type": "Task",
+      "Comment": "Not recovered after the grace period: start alerting.",
+      "Resource": "arn:aws:states:::aws-sdk:dynamodb:transactWriteItems",
+      "Arguments": {
+        "TransactItems": [
+          {
+            "Update": {
+              "TableName": "${TableName}",
+              "Key": {
+                "PK": {
+                  "S": "{% 'INCIDENT#' & $incidentId %}"
+                },
+                "SK": {
+                  "S": "META"
+                }
+              },
+              "UpdateExpression": "SET #s = :s",
+              "ExpressionAttributeNames": {
+                "#s": "status"
+              },
+              "ExpressionAttributeValues": {
+                ":s": {
+                  "S": "ALERTING"
+                }
+              }
+            }
+          },
+          {
+            "Update": {
+              "TableName": "${TableName}",
+              "Key": {
+                "PK": {
+                  "S": "{% 'DEVICE#' & $deviceId %}"
+                },
+                "SK": {
+                  "S": "META"
+                }
+              },
+              "UpdateExpression": "SET #s = :s",
+              "ExpressionAttributeNames": {
+                "#s": "status"
+              },
+              "ExpressionAttributeValues": {
+                ":s": {
+                  "S": "ALERTING"
+                }
+              }
+            }
+          },
+          {
+            "Put": {
+              "TableName": "${TableName}",
+              "Item": {
+                "PK": {
+                  "S": "{% 'INCIDENT#' & $incidentId %}"
+                },
+                "SK": {
+                  "S": "{% 'EVENT#' & $now() & '#GRACE_EXPIRED' %}"
+                },
+                "incidentId": {
+                  "S": "{% $incidentId %}"
+                },
+                "deviceId": {
+                  "S": "{% $deviceId %}"
+                },
+                "type": {
+                  "S": "GRACE_EXPIRED"
+                },
+                "ts": {
+                  "S": "{% $now() %}"
+                },
+                "actor": {
+                  "S": "system"
+                },
+                "detail": {
+                  "S": "{% $incidentType = 'POWER_LOST' ? 'Still on battery power after the grace period (' & $latestTempC & ' °C)' : ($incidentType = 'SENSOR_OFFLINE' ? 'Sensor still silent — nobody knows the temperature' : 'Still out of range after the grace period (' & $latestTempC & ' °C)') %}"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDb.ProvisionedThroughputExceededException",
+            "DynamoDb.TransactionConflictException",
+            "DynamoDb.TransactionCanceledException",
+            "DynamoDb.ThrottlingException",
+            "DynamoDb.InternalServerErrorException",
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 4,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Next": "NotifyResponder"
+    },
+    "NotifyResponder": {
+      "Type": "Task",
+      "Comment": "Pause (for free) until a human taps an action. TimeoutSeconds turns silence into escalation.",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Arguments": {
+        "FunctionName": "${NotifyResponderFunctionArn}",
+        "Payload": {
+          "mode": "ACK",
+          "taskToken": "{% $states.context.Task.Token %}",
+          "incidentId": "{% $incidentId %}",
+          "deviceId": "{% $deviceId %}",
+          "level": "{% $level %}",
+          "responderId": "{% $escalation[$level] %}",
+          "ackTimeoutSeconds": "{% $ackTimeout %}"
+        }
+      },
+      "TimeoutSeconds": "{% $ackTimeout %}",
+      "Assign": {
+        "ack": "{% $states.result %}"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.Timeout"
+          ],
+          "Assign": {
+            "escalationReason": "TIMEOUT"
+          },
+          "Next": "Escalate"
+        },
+        {
+          "ErrorEquals": [
+            "NeedHelp"
+          ],
+          "Assign": {
+            "escalationReason": "NEED_HELP"
+          },
+          "Next": "Escalate"
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Assign": {
+            "escalationReason": "NOTIFY_FAILED"
+          },
+          "Next": "Escalate"
+        }
+      ],
+      "Next": "RecordAction"
+    },
+    "Escalate": {
+      "Type": "Task",
+      "Comment": "Nobody answered (or they asked for help): move one level up the escalation chain.",
+      "Resource": "arn:aws:states:::aws-sdk:dynamodb:transactWriteItems",
+      "Arguments": {
+        "TransactItems": [
+          {
+            "Update": {
+              "TableName": "${TableName}",
+              "Key": {
+                "PK": {
+                  "S": "{% 'INCIDENT#' & $incidentId %}"
+                },
+                "SK": {
+                  "S": "META"
+                }
+              },
+              "UpdateExpression": "SET #l = :l REMOVE pendingAck",
+              "ExpressionAttributeNames": {
+                "#l": "level"
+              },
+              "ExpressionAttributeValues": {
+                ":l": {
+                  "N": "{% $string($level + 1) %}"
+                }
+              }
+            }
+          },
+          {
+            "Put": {
+              "TableName": "${TableName}",
+              "Item": {
+                "PK": {
+                  "S": "{% 'INCIDENT#' & $incidentId %}"
+                },
+                "SK": {
+                  "S": "{% 'EVENT#' & $now() & '#ESCALATED' %}"
+                },
+                "incidentId": {
+                  "S": "{% $incidentId %}"
+                },
+                "deviceId": {
+                  "S": "{% $deviceId %}"
+                },
+                "type": {
+                  "S": "ESCALATED"
+                },
+                "ts": {
+                  "S": "{% $now() %}"
+                },
+                "actor": {
+                  "S": "{% $escalation[$level] %}"
+                },
+                "detail": {
+                  "S": "{% ($escalationReason = 'NEED_HELP' ? 'Responder asked for help' : ($escalationReason = 'TIMEOUT' ? 'No response within ' & $ackTimeout & ' s' : 'Could not deliver the alert')) & ($level + 1 < $count($escalation) ? ' — escalating to the next responder' : ' — no more responders') %}"
+                },
+                "toResponder": {
+                  "S": "{% $level + 1 < $count($escalation) ? $escalation[$level + 1] : '' %}"
+                },
+                "reason": {
+                  "S": "{% $escalationReason %}"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDb.ProvisionedThroughputExceededException",
+            "DynamoDb.TransactionConflictException",
+            "DynamoDb.TransactionCanceledException",
+            "DynamoDb.ThrottlingException",
+            "DynamoDb.InternalServerErrorException",
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 4,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Next": "MoreResponders",
+      "Assign": {
+        "level": "{% $level + 1 %}"
+      }
+    },
+    "MoreResponders": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Condition": "{% $level < $count($escalation) %}",
+          "Next": "NotifyResponder"
+        }
+      ],
+      "Default": "NobodyAnswered"
+    },
+    "NobodyAnswered": {
+      "Type": "Pass",
+      "Assign": {
+        "criticalStatus": "CRITICAL_UNACKNOWLEDGED",
+        "criticalDetail": "Nobody acknowledged the alert — every responder on the chain was tried"
+      },
+      "Next": "MarkCritical"
+    },
+    "RecordAction": {
+      "Type": "Task",
+      "Comment": "A responder acted: record who, what and when.",
+      "Resource": "arn:aws:states:::aws-sdk:dynamodb:transactWriteItems",
+      "Arguments": {
+        "TransactItems": [
+          {
+            "Update": {
+              "TableName": "${TableName}",
+              "Key": {
+                "PK": {
+                  "S": "{% 'INCIDENT#' & $incidentId %}"
+                },
+                "SK": {
+                  "S": "META"
+                }
+              },
+              "UpdateExpression": "SET #s = :s, ackedBy = :by, ackedByName = :name, ackedAction = :a, ackedAt = :at REMOVE pendingAck",
+              "ExpressionAttributeNames": {
+                "#s": "status"
+              },
+              "ExpressionAttributeValues": {
+                ":s": {
+                  "S": "ACKNOWLEDGED"
+                },
+                ":by": {
+                  "S": "{% $ack.responderId %}"
+                },
+                ":name": {
+                  "S": "{% $ack.responderName %}"
+                },
+                ":a": {
+                  "S": "{% $ack.action %}"
+                },
+                ":at": {
+                  "S": "{% $ack.at %}"
+                }
+              }
+            }
+          },
+          {
+            "Update": {
+              "TableName": "${TableName}",
+              "Key": {
+                "PK": {
+                  "S": "{% 'DEVICE#' & $deviceId %}"
+                },
+                "SK": {
+                  "S": "META"
+                }
+              },
+              "UpdateExpression": "SET #s = :s",
+              "ExpressionAttributeNames": {
+                "#s": "status"
+              },
+              "ExpressionAttributeValues": {
+                ":s": {
+                  "S": "ACKNOWLEDGED"
+                }
+              }
+            }
+          },
+          {
+            "Put": {
+              "TableName": "${TableName}",
+              "Item": {
+                "PK": {
+                  "S": "{% 'INCIDENT#' & $incidentId %}"
+                },
+                "SK": {
+                  "S": "{% 'EVENT#' & $now() & '#ACKED' %}"
+                },
+                "incidentId": {
+                  "S": "{% $incidentId %}"
+                },
+                "deviceId": {
+                  "S": "{% $deviceId %}"
+                },
+                "type": {
+                  "S": "ACKED"
+                },
+                "ts": {
+                  "S": "{% $now() %}"
+                },
+                "actor": {
+                  "S": "{% $ack.responderId %}"
+                },
+                "detail": {
+                  "S": "{% $ack.responderName & ': ' & ($ack.action = 'MOVED_TO_BACKUP' ? 'moved the stock to a backup cooler' : 'fixed the cause (door closed / power restored)') & ($ack.note ? ' — \"' & $ack.note & '\"' : '') %}"
+                },
+                "action": {
+                  "S": "{% $ack.action %}"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDb.ProvisionedThroughputExceededException",
+            "DynamoDb.TransactionConflictException",
+            "DynamoDb.TransactionCanceledException",
+            "DynamoDb.ThrottlingException",
+            "DynamoDb.InternalServerErrorException",
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 4,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Next": "WaitForRecovery",
+      "Assign": {
+        "recoveryChecks": 0
+      }
+    },
+    "WaitForRecovery": {
+      "Type": "Wait",
+      "Seconds": "{% $recheckSeconds %}",
+      "Next": "CheckRecoveryAfterAck"
+    },
+    "CheckRecoveryAfterAck": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${CheckRecoveredFunctionArn}",
+        "Payload": {
+          "incidentId": "{% $incidentId %}",
+          "deviceId": "{% $deviceId %}",
+          "type": "{% $incidentType %}",
+          "minC": "{% $minC %}",
+          "maxC": "{% $maxC %}",
+          "offlineAfterSeconds": "{% $offlineAfter %}"
+        }
+      },
+      "Assign": {
+        "recovered": "{% $states.result.Payload.recovered %}",
+        "latestTempC": "{% $states.result.Payload.latestTempC %}",
+        "recoveryChecks": "{% $recoveryChecks + 1 %}"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Next": "BackInRange"
+    },
+    "BackInRange": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Condition": "{% $recovered %}",
+          "Next": "MarkResolved"
+        },
+        {
+          "Condition": "{% $recoveryChecks >= $maxRecoveryChecks %}",
+          "Next": "StillOutOfRange"
+        }
+      ],
+      "Default": "WaitForRecovery"
+    },
+    "StillOutOfRange": {
+      "Type": "Pass",
+      "Assign": {
+        "criticalStatus": "CRITICAL_NOT_RECOVERED",
+        "criticalDetail": "Acknowledged, but the device did not return to normal (in range, on mains, reporting) in time"
+      },
+      "Next": "MarkCritical"
+    },
+    "MarkResolved": {
+      "Type": "Task",
+      "Comment": "Back in range after a human acted: resolve and free the device.",
+      "Resource": "arn:aws:states:::aws-sdk:dynamodb:transactWriteItems",
+      "Arguments": {
+        "TransactItems": [
+          {
+            "Update": {
+              "TableName": "${TableName}",
+              "Key": {
+                "PK": {
+                  "S": "{% 'INCIDENT#' & $incidentId %}"
+                },
+                "SK": {
+                  "S": "META"
+                }
+              },
+              "UpdateExpression": "SET #s = :s, resolvedAt = :now",
+              "ExpressionAttributeNames": {
+                "#s": "status"
+              },
+              "ExpressionAttributeValues": {
+                ":s": {
+                  "S": "RESOLVED"
+                },
+                ":now": {
+                  "S": "{% $now() %}"
+                }
+              }
+            }
+          },
+          {
+            "Update": {
+              "TableName": "${TableName}",
+              "Key": {
+                "PK": {
+                  "S": "{% 'DEVICE#' & $deviceId %}"
+                },
+                "SK": {
+                  "S": "META"
+                }
+              },
+              "UpdateExpression": "SET #s = :s REMOVE openIncidentId, incidentStartedAt",
+              "ExpressionAttributeNames": {
+                "#s": "status"
+              },
+              "ExpressionAttributeValues": {
+                ":s": {
+                  "S": "OK"
+                }
+              }
+            }
+          },
+          {
+            "Put": {
+              "TableName": "${TableName}",
+              "Item": {
+                "PK": {
+                  "S": "{% 'INCIDENT#' & $incidentId %}"
+                },
+                "SK": {
+                  "S": "{% 'EVENT#' & $now() & '#RESOLVED' %}"
+                },
+                "incidentId": {
+                  "S": "{% $incidentId %}"
+                },
+                "deviceId": {
+                  "S": "{% $deviceId %}"
+                },
+                "type": {
+                  "S": "RESOLVED"
+                },
+                "ts": {
+                  "S": "{% $now() %}"
+                },
+                "actor": {
+                  "S": "system"
+                },
+                "detail": {
+                  "S": "{% 'Back to normal' & ($latestTempC = null ? '' : ' at ' & $latestTempC & ' °C') & ' — incident resolved' %}"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDb.ProvisionedThroughputExceededException",
+            "DynamoDb.TransactionConflictException",
+            "DynamoDb.TransactionCanceledException",
+            "DynamoDb.ThrottlingException",
+            "DynamoDb.InternalServerErrorException",
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 4,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Next": "BuildEvidence"
+    },
+    "MarkCritical": {
+      "Type": "Task",
+      "Comment": "Escalation exhausted or no recovery: mark CRITICAL so the stock is checked before use.",
+      "Resource": "arn:aws:states:::aws-sdk:dynamodb:transactWriteItems",
+      "Arguments": {
+        "TransactItems": [
+          {
+            "Update": {
+              "TableName": "${TableName}",
+              "Key": {
+                "PK": {
+                  "S": "{% 'INCIDENT#' & $incidentId %}"
+                },
+                "SK": {
+                  "S": "META"
+                }
+              },
+              "UpdateExpression": "SET #s = :s, criticalAt = :now REMOVE pendingAck",
+              "ExpressionAttributeNames": {
+                "#s": "status"
+              },
+              "ExpressionAttributeValues": {
+                ":s": {
+                  "S": "{% $criticalStatus %}"
+                },
+                ":now": {
+                  "S": "{% $now() %}"
+                }
+              }
+            }
+          },
+          {
+            "Update": {
+              "TableName": "${TableName}",
+              "Key": {
+                "PK": {
+                  "S": "{% 'DEVICE#' & $deviceId %}"
+                },
+                "SK": {
+                  "S": "META"
+                }
+              },
+              "UpdateExpression": "SET #s = :s",
+              "ExpressionAttributeNames": {
+                "#s": "status"
+              },
+              "ExpressionAttributeValues": {
+                ":s": {
+                  "S": "CRITICAL"
+                }
+              }
+            }
+          },
+          {
+            "Put": {
+              "TableName": "${TableName}",
+              "Item": {
+                "PK": {
+                  "S": "{% 'INCIDENT#' & $incidentId %}"
+                },
+                "SK": {
+                  "S": "{% 'EVENT#' & $now() & '#CRITICAL' %}"
+                },
+                "incidentId": {
+                  "S": "{% $incidentId %}"
+                },
+                "deviceId": {
+                  "S": "{% $deviceId %}"
+                },
+                "type": {
+                  "S": "CRITICAL"
+                },
+                "ts": {
+                  "S": "{% $now() %}"
+                },
+                "actor": {
+                  "S": "system"
+                },
+                "detail": {
+                  "S": "{% $criticalDetail %}"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "DynamoDB.ProvisionedThroughputExceededException",
+            "DynamoDb.ProvisionedThroughputExceededException",
+            "DynamoDb.TransactionConflictException",
+            "DynamoDb.TransactionCanceledException",
+            "DynamoDb.ThrottlingException",
+            "DynamoDb.InternalServerErrorException",
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 4,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Next": "NotifyEveryone"
+    },
+    "NotifyEveryone": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${NotifyResponderFunctionArn}",
+        "Payload": {
+          "mode": "CRITICAL",
+          "incidentId": "{% $incidentId %}",
+          "deviceId": "{% $deviceId %}",
+          "escalation": "{% $escalation %}"
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "BuildEvidence"
+        }
+      ],
+      "Next": "BuildEvidence"
+    },
+    "BuildEvidence": {
+      "Type": "Task",
+      "Comment": "Write the JSON + HTML evidence report to S3 with a SHA-256 fingerprint.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${BuildEvidenceFunctionArn}",
+        "Payload": {
+          "incidentId": "{% $incidentId %}"
+        }
+      },
+      "Output": "{% $states.result.Payload %}",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException",
+            "Lambda.Unknown"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2,
+          "JitterStrategy": "FULL"
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "EvidenceFailed"
+        }
+      ],
+      "Next": "Done"
+    },
+    "EvidenceFailed": {
+      "Type": "Fail",
+      "Error": "EvidenceFailed",
+      "Cause": "Could not write the evidence report"
+    },
+    "Done": {
+      "Type": "Succeed"
+    }
+  }
+}

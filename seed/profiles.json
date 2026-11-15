@@ -1,0 +1,125 @@
+[
+  {
+    "profileId": "vaccine-fridge",
+    "order": 1,
+    "label": "Vaccine fridge",
+    "icon": "syringe",
+    "description": "Clinic vaccine fridge — the classic cold chain.",
+    "minC": 2,
+    "maxC": 8,
+    "graceSeconds": 900,
+    "ackTimeoutSeconds": 600,
+    "recoveryWindowSeconds": 3600,
+    "recheckSeconds": 300,
+    "escalation": [
+      "nurse-on-duty",
+      "facility-manager",
+      "district-pharmacist"
+    ],
+    "baselineC": 5,
+    "powerGraceSeconds": 300,
+    "offlineAfterSeconds": 300
+  },
+  {
+    "profileId": "blood-bank",
+    "order": 2,
+    "label": "Blood bank (red cells)",
+    "icon": "droplet",
+    "description": "Red cell storage — high value, high stakes.",
+    "minC": 2,
+    "maxC": 6,
+    "graceSeconds": 600,
+    "ackTimeoutSeconds": 600,
+    "recoveryWindowSeconds": 3600,
+    "recheckSeconds": 300,
+    "escalation": [
+      "nurse-on-duty",
+      "facility-manager",
+      "district-pharmacist"
+    ],
+    "baselineC": 4,
+    "powerGraceSeconds": 300,
+    "offlineAfterSeconds": 300
+  },
+  {
+    "profileId": "plasma-freezer",
+    "order": 3,
+    "label": "Plasma freezer",
+    "icon": "snowflake",
+    "description": "Frozen plasma — a max-only rule (must stay at or below -25 °C).",
+    "minC": null,
+    "maxC": -25,
+    "graceSeconds": 600,
+    "ackTimeoutSeconds": 600,
+    "recoveryWindowSeconds": 3600,
+    "recheckSeconds": 300,
+    "escalation": [
+      "lab-technologist",
+      "facility-manager",
+      "district-pharmacist"
+    ],
+    "baselineC": -30,
+    "powerGraceSeconds": 300,
+    "offlineAfterSeconds": 300
+  },
+  {
+    "profileId": "insulin-home",
+    "order": 4,
+    "label": "Insulin at home",
+    "icon": "home",
+    "description": "A patient's home fridge — escalates to the patient, then a family member.",
+    "minC": 2,
+    "maxC": 8,
+    "graceSeconds": 1800,
+    "ackTimeoutSeconds": 900,
+    "recoveryWindowSeconds": 7200,
+    "recheckSeconds": 300,
+    "escalation": [
+      "patient",
+      "family-member"
+    ],
+    "baselineC": 5,
+    "powerGraceSeconds": 600,
+    "offlineAfterSeconds": 300
+  },
+  {
+    "profileId": "lab-samples",
+    "order": 5,
+    "label": "Lab specimen fridge",
+    "icon": "flask",
+    "description": "A spoiled sample means a patient must be re-tested.",
+    "minC": 2,
+    "maxC": 8,
+    "graceSeconds": 900,
+    "ackTimeoutSeconds": 600,
+    "recoveryWindowSeconds": 3600,
+    "recheckSeconds": 300,
+    "escalation": [
+      "lab-technologist",
+      "facility-manager"
+    ],
+    "baselineC": 5,
+    "powerGraceSeconds": 300,
+    "offlineAfterSeconds": 300
+  },
+  {
+    "profileId": "milk-bank",
+    "order": 6,
+    "label": "Donor breast milk",
+    "icon": "milk",
+    "description": "Donor milk for premature babies — max-only rule.",
+    "minC": null,
+    "maxC": 4,
+    "graceSeconds": 900,
+    "ackTimeoutSeconds": 600,
+    "recoveryWindowSeconds": 3600,
+    "recheckSeconds": 300,
+    "escalation": [
+      "nurse-on-duty",
+      "facility-manager"
+    ],
+    "baselineC": 2.5,
+    "powerGraceSeconds": 300,
+    "offlineAfterSeconds": 300
+  }
+]

@@ -1,0 +1,6 @@
+[
+  { "deviceId": "clinic-vaccine-01", "order": 1, "name": "Vaccine fridge", "location": "Community clinic · Room 2", "profileId": "vaccine-fridge" },
+  { "deviceId": "bloodbank-01", "order": 2, "name": "Blood bank", "location": "District hospital · Blood bank", "profileId": "blood-bank" },
+  { "deviceId": "insulin-home-01", "order": 3, "name": "Insulin at home", "location": "Patient home · Kitchen fridge", "profileId": "insulin-home" },
+  { "deviceId": "plasma-01", "order": 4, "name": "Plasma freezer", "location": "District hospital · Blood bank", "profileId": "plasma-freezer" }
+]

@@ -1,0 +1,165 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 860" width="1400" height="860" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#475569"/>
+    </marker>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#dc2626"/>
+    </marker>
+    <style>
+      .t{font-size:15px;font-weight:700;fill:#0f172a}
+      .s{font-size:12px;fill:#334155}
+      .x{font-size:11px;fill:#64748b}
+      .h{font-size:13px;font-weight:700;fill:#0f172a;letter-spacing:.5px}
+      .ln{stroke:#475569;stroke-width:1.8;fill:none;marker-end:url(#a)}
+      .lr{stroke:#dc2626;stroke-width:1.8;fill:none;marker-end:url(#ar);stroke-dasharray:6 4}
+      .st{font-size:11.5px;font-weight:600;fill:#0f172a}
+    </style>
+  </defs>
+  <rect width="1400" height="860" fill="#f8fafc"/>
+  <text x="40" y="48" font-size="26" font-weight="800" fill="#0f172a">ColdChain Guard: architecture</text>
+  <text x="40" y="74" class="s">One SAM template · no servers · three failure signals (temperature, power loss, silent sensor) · one Step Functions execution per incident</text>
+
+  <!-- Browser -->
+  <rect x="40" y="110" width="270" height="250" rx="18" fill="#fff" stroke="#cbd5e1"/>
+  <text x="60" y="140" class="t">Browser: React SPA</text>
+  <text x="60" y="166" class="s">• Live dashboard (polls /dashboard, 2 s)</text>
+  <text x="60" y="188" class="s">• Sensor simulator (POST /readings, 2 s)</text>
+  <text x="60" y="210" class="s">• Responder phones + /respond view</text>
+  <text x="60" y="232" class="s">• Incident page: chart, timeline,</text>
+  <text x="72" y="250" class="s">evidence + in-browser SHA-256 verify</text>
+  <rect x="60" y="275" width="230" height="66" rx="12" fill="#f1f5f9"/>
+  <text x="75" y="300" class="st">Sensors (simulated for the demo)</text>
+  <text x="75" y="320" class="x">Production: AWS IoT Core with</text>
+  <text x="75" y="334" class="x">per-device certificates</text>
+
+  <!-- CloudFront + S3 -->
+  <rect x="40" y="420" width="270" height="92" rx="18" fill="#ede9fe" stroke="#a78bfa"/>
+  <text x="60" y="450" class="t">Amazon CloudFront</text>
+  <text x="60" y="472" class="s">HTTPS · SPA rewrite function</text>
+  <text x="60" y="490" class="s">OAC to two private buckets</text>
+  <rect x="40" y="560" width="125" height="80" rx="14" fill="#dcfce7" stroke="#4ade80"/>
+  <text x="54" y="590" class="t">S3</text>
+  <text x="54" y="610" class="s">frontend</text>
+  <text x="54" y="626" class="x">static build</text>
+  <rect x="185" y="560" width="125" height="80" rx="14" fill="#dcfce7" stroke="#4ade80"/>
+  <text x="199" y="590" class="t">S3</text>
+  <text x="199" y="610" class="s">evidence/</text>
+  <text x="199" y="626" class="x">JSON + HTML</text>
+  <path class="ln" d="M175 360 V418"/>
+  <path class="ln" d="M110 512 V558"/>
+  <path class="ln" d="M245 512 V558"/>
+
+  <!-- API Gateway -->
+  <rect x="380" y="110" width="210" height="250" rx="18" fill="#fef3c7" stroke="#f59e0b"/>
+  <text x="400" y="140" class="t">API Gateway</text>
+  <text x="400" y="158" class="t">HTTP API</text>
+  <text x="400" y="186" class="s">POST /readings, /events</text>
+  <text x="400" y="206" class="s">GET  /dashboard, /devices…</text>
+  <text x="400" y="226" class="s">GET  /incidents/{id}</text>
+  <text x="400" y="246" class="s">POST /incidents/{id}/respond</text>
+  <text x="400" y="266" class="s">POST /demo/reset</text>
+  <text x="400" y="296" class="x">CORS: CloudFront origin only</text>
+  <text x="400" y="312" class="x">Throttling · x-device-key</text>
+  <path class="ln" d="M310 200 H378"/>
+
+  <!-- Lambdas -->
+  <g>
+    <rect x="660" y="110" width="230" height="64" rx="14" fill="#ffedd5" stroke="#fb923c"/>
+    <text x="676" y="136" class="t">λ ingest_reading</text>
+    <text x="676" y="156" class="x">+ λ ingest_event (power events)</text>
+    <rect x="660" y="186" width="230" height="52" rx="14" fill="#ffedd5" stroke="#fb923c"/>
+    <text x="676" y="210" class="t">λ api_read</text>
+    <text x="676" y="227" class="x">one call feeds the whole dashboard</text>
+    <rect x="660" y="250" width="230" height="52" rx="14" fill="#ffedd5" stroke="#fb923c"/>
+    <text x="676" y="274" class="t">λ respond</text>
+    <text x="676" y="291" class="x">claim ack code once → SendTask*</text>
+    <rect x="660" y="314" width="230" height="46" rx="14" fill="#ffedd5" stroke="#fb923c"/>
+    <text x="676" y="342" class="t">λ demo_reset</text>
+  </g>
+  <path class="ln" d="M590 142 H658"/>
+  <path class="ln" d="M590 212 H658"/>
+  <path class="ln" d="M590 276 H658"/>
+  <path class="ln" d="M590 337 H658"/>
+
+  <!-- Step Functions -->
+  <rect x="380" y="410" width="980" height="300" rx="20" fill="#fff" stroke="#e11d48" stroke-width="1.5"/>
+  <text x="400" y="440" class="t">AWS Step Functions: Standard workflow (JSONata), one execution per incident</text>
+  <text x="400" y="460" class="x">Execution name = incidentId (idempotent) · X-Ray tracing · direct DynamoDB SDK integrations for status/event writes</text>
+
+  <g font-size="12">
+    <rect x="400" y="480" width="92" height="40" rx="10" fill="#f1f5f9" stroke="#94a3b8"/><text x="420" y="505" class="st">Init</text>
+    <rect x="512" y="480" width="108" height="40" rx="10" fill="#fef3c7" stroke="#f59e0b"/><text x="524" y="499" class="st">Wait (grace)</text><text x="524" y="513" class="x">$0 while waiting</text>
+    <rect x="640" y="480" width="130" height="40" rx="10" fill="#ffedd5" stroke="#fb923c"/><text x="652" y="505" class="st">λ check_recovered</text>
+    <polygon points="840,480 880,500 840,520 800,500" fill="#f1f5f9" stroke="#94a3b8"/><text x="823" y="504" class="x">ok?</text>
+    <rect x="910" y="480" width="170" height="40" rx="10" fill="#dcfce7" stroke="#22c55e"/><text x="922" y="499" class="st">RECOVERED</text><text x="922" y="513" class="x">no alarm · then evidence</text>
+
+    <rect x="640" y="560" width="200" height="54" rx="10" fill="#fee2e2" stroke="#ef4444"/>
+    <text x="652" y="580" class="st">λ notify_responder</text>
+    <text x="652" y="596" class="x">.waitForTaskToken · paused for free</text>
+    <text x="652" y="609" class="x">TimeoutSeconds = ack timeout</text>
+    <rect x="900" y="560" width="150" height="54" rx="10" fill="#fee2e2" stroke="#ef4444"/>
+    <text x="912" y="582" class="st">Escalate (level+1)</text>
+    <text x="912" y="600" class="x">silence or "Need help"</text>
+    <rect x="1100" y="560" width="230" height="54" rx="10" fill="#7f1d1d"/>
+    <text x="1112" y="582" class="st" fill="#fff" style="fill:#fff">MarkCritical → notify everyone</text>
+    <text x="1112" y="600" class="x" style="fill:#fecaca">chain exhausted / no recovery</text>
+
+    <rect x="400" y="645" width="220" height="48" rx="10" fill="#e0f2fe" stroke="#0ea5e9"/>
+    <text x="412" y="666" class="st">RecordAction → Wait/check loop</text>
+    <text x="412" y="682" class="x">until back in range → RESOLVED</text>
+    <rect x="660" y="645" width="260" height="48" rx="10" fill="#ede9fe" stroke="#8b5cf6"/>
+    <text x="672" y="666" class="st">λ build_evidence → S3</text>
+    <text x="672" y="682" class="x">canonical JSON · SHA-256 · ChecksumSHA256</text>
+  </g>
+  <path class="ln" d="M492 500 H510"/>
+  <path class="ln" d="M620 500 H638"/>
+  <path class="ln" d="M770 500 H798"/>
+  <path class="ln" d="M880 500 H908"/>
+  <path class="ln" d="M840 520 V540 H740 V558"/>
+  <path class="lr" d="M840 587 H898"/>
+  <text x="846" y="580" class="x" style="fill:#dc2626">timeout</text>
+  <path class="ln" d="M975 614 V630 H760 V616" />
+  <path class="lr" d="M1050 587 H1098"/>
+  <path class="ln" d="M700 614 V630 H510 V643"/>
+  <path class="ln" d="M620 669 H658"/>
+  <path class="ln" d="M1215 614 V669 H922"/>
+
+  <!-- ingest -> SFN -->
+  <path class="ln" d="M900 142 H1000 V408"/>
+  <text x="1008" y="250" class="s">StartExecution</text>
+  <text x="1008" y="266" class="x">(out of range or power lost,</text>
+  <text x="1008" y="280" class="x">no open incident)</text>
+  <path class="ln" d="M900 276 H960 V408"/>
+  <text x="920" y="395" class="x">resume</text>
+
+  <!-- DynamoDB -->
+  <rect x="380" y="750" width="660" height="84" rx="18" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="400" y="780" class="t">Amazon DynamoDB: single table, on-demand</text>
+  <text x="400" y="800" class="s">Profiles · Devices · Readings (TTL 24 h) · Incidents · Events · Responders · one-time ack codes</text>
+  <text x="400" y="818" class="x">Conditional write attribute_not_exists(openIncidentId) ⇒ exactly one open incident per device · GSI1 lists incidents/devices</text>
+  <path class="ln" d="M690 712 V748"/>
+
+  <!-- SES -->
+  <rect x="1180" y="110" width="180" height="92" rx="18" fill="#fce7f3" stroke="#ec4899"/>
+  <text x="1200" y="140" class="t">Amazon SES</text>
+  <text x="1200" y="162" class="s">alert email with a</text>
+  <text x="1200" y="180" class="s">one-tap, one-time link</text>
+  <path class="ln" d="M810 558 V550 H1345 V204"/>
+
+  <!-- heartbeat -->
+  <rect x="1180" y="232" width="150" height="128" rx="16" fill="#e0e7ff" stroke="#6366f1"/>
+  <text x="1194" y="256" class="st">EventBridge</text>
+  <text x="1194" y="272" class="st">Scheduler · 1 min</text>
+  <text x="1194" y="296" class="t" style="font-size:13px">λ check_heartbeats</text>
+  <text x="1194" y="316" class="x">silent sensor →</text>
+  <text x="1194" y="330" class="x">SENSOR_OFFLINE</text>
+  <text x="1194" y="348" class="x">(only idle cost)</text>
+  <path class="ln" d="M1255 360 V408"/>
+  <!-- evidence to S3 -->
+  <path class="ln" d="M790 693 V728 H247 V642"/>
+
+  <text x="1075" y="790" class="s" font-weight="700">Idle cost ≈ $0 (free tier)</text>
+  <text x="1075" y="808" class="x">No servers or containers; only a 1-min heartbeat.</text>
+  <text x="1075" y="824" class="x">Waits and paused callbacks cost nothing.</text>
+</svg>

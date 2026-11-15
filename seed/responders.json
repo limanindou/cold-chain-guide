@@ -1,0 +1,8 @@
+[
+  { "responderId": "nurse-on-duty", "name": "Nurse Thandi", "role": "Nurse on duty", "email": "" },
+  { "responderId": "facility-manager", "name": "Manager Pieter", "role": "Facility manager", "email": "" },
+  { "responderId": "district-pharmacist", "name": "Pharmacist Aisha", "role": "District pharmacist", "email": "" },
+  { "responderId": "lab-technologist", "name": "Lab tech Johan", "role": "Lab technologist", "email": "" },
+  { "responderId": "patient", "name": "Sipho (patient)", "role": "Patient", "email": "" },
+  { "responderId": "family-member", "name": "Lerato (family)", "role": "Family member", "email": "" }
+]
