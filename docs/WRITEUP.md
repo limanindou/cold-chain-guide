@@ -1,9 +1,9 @@
-# ColdChain Guard: a serverless watchdog that saves medicines when the fridge fails
+﻿# ColdChain Guard: a serverless watchdog that saves medicines when the fridge fails
 
 > Draft for the AWS Builder Center article. Replace every `TODO` before publishing (video link, screenshots, real cost numbers from your deploy).
 
 **Demo video:** TODO (YouTube, public, under 3 minutes)
-**Live app:** https://d2wcjncrzc05nu.cloudfront.net  ·  **Code:** TODO (repository link)
+**Live app:** https://d2wcjncrzc05nu.cloudfront.net  Â·  **Code:** https://github.com/limanindou/cold-chain-guide
 
 Tags: `#serverless` `#aws-step-functions` `#aws-lambda` `#amazon-dynamodb` `#aws-sam` `#healthcare`
 
@@ -32,7 +32,7 @@ TODO: dashboard screenshot
   recovers (a door opening), the incident closes quietly with **no alarm**.
 - **Gets a human to act.** If it hasn't recovered, the first responder gets an alert with one-tap actions: *Moved
   to backup cooler*, *Fixed (door/power)*, *Need help*.
-- **Escalates on silence.** No answer before the timeout → the next person (nurse → manager → pharmacist), then
+- **Escalates on silence.** No answer before the timeout â†’ the next person (nurse â†’ manager â†’ pharmacist), then
   `CRITICAL` with everyone alerted.
 - **Keeps tamper-evident proof.** Every incident ends with an evidence report (time out of range, min/max, who was
   alerted, who acted, full timeline) fingerprinted with **SHA-256**, so a pharmacist can make the use-or-discard call.
@@ -64,25 +64,25 @@ incident per device**, so a power cut that later becomes a temperature excursion
 1. A sensor (simulated in the browser for the demo) `POST`s `/readings` to **API Gateway**.
 2. **Lambda `ingest_reading`** validates it, updates the device, stores the reading in **DynamoDB** (TTL 24 h) and
    evaluates the device's profile rule.
-3. Out of range with no open incident → one **conditional write** (`attribute_not_exists(openIncidentId)`) opens the
+3. Out of range with no open incident â†’ one **conditional write** (`attribute_not_exists(openIncidentId)`) opens the
    incident atomically, then **Step Functions `StartExecution`** with the incidentId as the execution name. Two racing
    readings can never create two incidents.
 4. The workflow **waits** through the grace period (a Wait state, free while waiting), then **checks** the latest
-   reading. Recovered → close quietly.
-5. Still out → **`notify_responder`** runs as `.waitForTaskToken`. It stores the task token under a random one-time
+   reading. Recovered â†’ close quietly.
+5. Still out â†’ **`notify_responder`** runs as `.waitForTaskToken`. It stores the task token under a random one-time
    `ackCode`, emails a link through **SES** and lights up the responder's phone in the UI. The workflow is now
    **paused at zero cost**.
-6. The responder taps an action → **Lambda `respond`** claims the code once and calls `SendTaskSuccess`. Silence →
-   `TimeoutSeconds` raises `States.Timeout` → **Escalate**. "Need help" → `SendTaskFailure("NeedHelp")` → Escalate.
-7. After an action, a Wait/check loop confirms the fridge is back in range → **Resolved**. Otherwise → **Critical**.
+6. The responder taps an action â†’ **Lambda `respond`** claims the code once and calls `SendTaskSuccess`. Silence â†’
+   `TimeoutSeconds` raises `States.Timeout` â†’ **Escalate**. "Need help" â†’ `SendTaskFailure("NeedHelp")` â†’ Escalate.
+7. After an action, a Wait/check loop confirms the fridge is back in range â†’ **Resolved**. Otherwise â†’ **Critical**.
 8. **`build_evidence`** writes canonical JSON + HTML to **S3**, stores the SHA-256 on the incident, and the report is
-   served through **CloudFront**. The UI re-hashes it in the browser to show ✅ Match.
+   served through **CloudFront**. The UI re-hashes it in the browser to show âœ… Match.
 
 ## 4. Serverless services and how they connect
 
 | Service | Role | Why this service |
 |---|---|---|
-| **AWS Step Functions** (Standard, JSONata) | One execution per incident: grace → alert → escalate → evidence | Durable timers that cost nothing while waiting, human-in-the-loop callbacks (`.waitForTaskToken`), timeouts as escalation triggers, and a visual execution history that *is* the audit trail |
+| **AWS Step Functions** (Standard, JSONata) | One execution per incident: grace â†’ alert â†’ escalate â†’ evidence | Durable timers that cost nothing while waiting, human-in-the-loop callbacks (`.waitForTaskToken`), timeouts as escalation triggers, and a visual execution history that *is* the audit trail |
 | **AWS Lambda** (9 functions, Python 3.12, arm64) | Ingest readings, ingest power events, heartbeat check, recovery check, notify, respond, evidence, read API, demo reset |
 | **Amazon EventBridge Scheduler** | Runs `check_heartbeats` every minute | Silence can only be detected by checking; a managed schedule needs no server | Small single-purpose functions with no idle cost |
 | **Amazon API Gateway** (HTTP API) | Front door for sensors, the dashboard and responders | Cheapest, simplest API, with CORS and throttling built in |
@@ -105,8 +105,8 @@ incident per device**, so a power cut that later becomes a temperature excursion
 4. **Direct SDK integrations.** Every status change is one atomic DynamoDB `TransactWriteItems` (incident + device +
    timeline event) straight from the state machine, so 7 of the workflow's 11 tasks need no Lambda.
 5. **Fingerprinted evidence generated by the workflow itself**, with in-browser verification (Web Crypto).
-6. **Demo time scaling.** One `TimeScale` parameter divides every timer (15 min → 20 s at ×45), applied in JSONata
-   inside the state machine. The UI shows a "Demo mode · time ×45" badge for transparency.
+6. **Demo time scaling.** One `TimeScale` parameter divides every timer (15 min â†’ 20 s at Ã—45), applied in JSONata
+   inside the state machine. The UI shows a "Demo mode Â· time Ã—45" badge for transparency.
 
 ## 6. Scale to zero and cost
 
@@ -120,10 +120,10 @@ Per-incident cost (us-east-1 list prices; TODO: confirm against Cost Explorer af
 
 | Item | Approx. per incident |
 |---|---|
-| Step Functions Standard: about 15–30 state transitions × $0.000025 | ≈ $0.0004–0.0008 |
-| Lambda: about 5–15 short invocations | < $0.00001 |
-| DynamoDB on-demand: about 20–40 writes/reads | ≈ $0.00005 |
-| SES: 1–3 emails × $0.0001 | ≈ $0.0003 |
+| Step Functions Standard: about 15â€“30 state transitions Ã— $0.000025 | â‰ˆ $0.0004â€“0.0008 |
+| Lambda: about 5â€“15 short invocations | < $0.00001 |
+| DynamoDB on-demand: about 20â€“40 writes/reads | â‰ˆ $0.00005 |
+| SES: 1â€“3 emails Ã— $0.0001 | â‰ˆ $0.0003 |
 | **Total** | **well under a tenth of a cent** |
 
 Each sensor reading costs about $4 per million (API request + Lambda + 2 writes). TODO: put the real total from the
@@ -133,7 +133,7 @@ deploy weekend here, e.g. "the whole hackathon cost $0.0X".
 
 - **Profiles are data.** Vaccines, blood, plasma (max-only rule), insulin at home (escalates to the patient, then
   family), lab samples, donor milk. A new use case is a JSON entry, not code.
-- **Same pattern, other domains:** *threshold → grace → human acknowledgement → escalate on silence → evidence* fits
+- **Same pattern, other domains:** *threshold â†’ grace â†’ human acknowledgement â†’ escalate on silence â†’ evidence* fits
   server rooms, food cold storage, incubators and greenhouses.
 - **Deploy your own:** `sam deploy --guided`, `python seed/seed.py`, `./scripts/deploy_frontend.sh`. The README walks
   through it in about 10 minutes.
