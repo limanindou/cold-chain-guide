@@ -33,7 +33,7 @@ waiting out afterwards. Then record short **B-roll** clips. You can record the v
 
 | When (from start of take) | Click | What you should see |
 |---|---|---|
-| 0:00 | Nothing. Slowly hover over the four cards | All green, "No workflow is running" banner, ×45 badge |
+| 0:00 | Nothing. Slowly hover over the four cards | All green, ×45 badge |
 | 0:15 | Simulator → **Vaccine fridge → Door open (brief)** | Red spike, card amber **Grace period** |
 | ~0:40 | Wait | Back to green; timeline shows **Recovered · no alarm**; no phone rings |
 | 0:50 | Simulator → **Blood bank → ⚡ Power cut** | Card shows **On battery · 97%**; *Power lost* incident opens while still in range |
